@@ -70,8 +70,15 @@ def fetch_schema(driver):
     query = "CALL db.schema.visualization()"
     with driver.session() as session:
         result = session.run(query)
-        nodes = result.single()["nodes"]
-        relationships = result.single()["relationships"]
+        if not result:
+            return {}, {}
+
+        record = result.single()
+        if not record:
+            return {}, {}
+
+        nodes = record.get("nodes", [])
+        relationships = record.get("relationships", [])
 
         node_properties = {}
         relationship_properties = {}
