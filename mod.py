@@ -33,7 +33,7 @@ class NodeProperty(BaseModel):
 class Node(BaseModel):
     id: int
     labels: List[str]
-    properties: Dict[str, NodeProperty]
+    properties: Dict[str, str]  # Dictionary of property names to their types
     relationships: List[Relationship] = []
 
 class DbCredentials(BaseModel):
@@ -90,7 +90,7 @@ def fetch_schema(driver):
 def fetch_nodes_and_relationships_from_neo4j(driver):
     node_properties, relationship_properties = fetch_schema(driver)
 
-    query = f"""
+    query = """
     MATCH (n)
     OPTIONAL MATCH (n)-[r]->(m)
     RETURN n, collect(r) as relationships, collect(m) as related_nodes
@@ -109,8 +109,8 @@ def fetch_nodes_and_relationships_from_neo4j(driver):
             labels_key = ":".join(node.labels)
             node_props_schema = node_properties.get(labels_key, {})
 
-            node_properties_values = {
-                prop_key: NodeProperty(type=prop_type)
+            node_properties_types = {
+                prop_key: prop_type
                 for prop_key, prop_type in node_props_schema.items()
             }
 
@@ -118,7 +118,7 @@ def fetch_nodes_and_relationships_from_neo4j(driver):
                 nodes_dict[node.id] = Node(
                     id=node.id,
                     labels=node.labels,
-                    properties=node_properties_values,
+                    properties=node_properties_types,
                     relationships=[]
                 )
 
