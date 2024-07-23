@@ -70,9 +70,7 @@ def fetch_schema(driver):
         node_properties = {}
 
         for node in nodes:
-            labels = node.get("labels", [])
-            if not isinstance(labels, list):
-                labels = [labels]
+            labels = list(node.get("labels", []))
             labels_key = ":".join([label for label in labels if label is not None])
             node_properties[labels_key] = {prop["propertyKey"]: determine_type(prop["propertyValue"]) for prop in node.get("properties", [])}
 
@@ -88,9 +86,7 @@ def fetch_nodes_from_neo4j(driver, node_properties):
         nodes_list = []
         for record in result:
             node = record["n"]
-            labels = node.labels if node.labels is not None else []
-            if not isinstance(labels, list):
-                labels = [labels]
+            labels = list(node.labels) if node.labels is not None else []
             labels_key = ":".join([label for label in labels if label is not None])
             node_props_schema = node_properties.get(labels_key, {})
 
