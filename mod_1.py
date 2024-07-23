@@ -79,26 +79,28 @@ def fetch_schema(driver):
 
 # Fetch nodes from Neo4j
 def fetch_nodes_from_neo4j(driver, node_properties):
-    query = "MATCH (n) RETURN n LIMIT 10"
+    query = "MATCH (n) RETURN n, keys(n) AS prop_keys, [key in keys(n) | n[key]] AS prop_values LIMIT 10"
     logger.info("Fetching nodes from Neo4j")
     with driver.session() as session:
         result = session.run(query)
         nodes_list = []
         for record in result:
             node = record["n"]
+            prop_keys = record["prop_keys"]
+            prop_values = record["prop_values"]
             labels = list(node.labels) if node.labels is not None else []
             labels_key = ":".join([label for label in labels if label is not None])
             node_props_schema = node_properties.get(labels_key, {})
 
-            node_properties_values = {
-                prop_key: determine_type(node.get(prop_key))
-                for prop_key in node_props_schema.keys()
+            node_properties_dict = {
+                prop_key: determine_type(prop_value)
+                for prop_key, prop_value in zip(prop_keys, prop_values)
             }
 
             nodes_list.append(Node(
                 id=node.id,
                 labels=labels,
-                properties=node_properties_values
+                properties=node_properties_dict
             ))
         logger.info(f"Fetched nodes: {nodes_list}")
         return nodes_list
