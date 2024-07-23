@@ -73,7 +73,7 @@ def fetch_schema(driver):
             labels = node["labels"]
             if not isinstance(labels, list):
                 labels = [labels]
-            labels_key = ":".join(labels)
+            labels_key = ":".join([label for label in labels if label is not None])
             node_properties[labels_key] = {prop["propertyKey"]: determine_type(prop["propertyValue"]) for prop in node["properties"]}
 
         logger.info(f"Fetched schema properties for nodes: {node_properties}")
@@ -91,7 +91,7 @@ def fetch_nodes_from_neo4j(driver, node_properties):
             labels = node.labels
             if not isinstance(labels, list):
                 labels = [labels]
-            labels_key = ":".join(labels)
+            labels_key = ":".join([label for label in labels if label is not None])
             node_props_schema = node_properties.get(labels_key, {})
 
             node_properties_types = {
