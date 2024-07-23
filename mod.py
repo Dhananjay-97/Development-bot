@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
+# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -69,8 +70,11 @@ def fetch_schema(driver):
         node_properties = {}
 
         for node in nodes:
-            labels = ":".join(node["labels"])
-            node_properties[labels] = {prop["propertyKey"]: determine_type(prop["propertyValue"]) for prop in node["properties"]}
+            labels = node["labels"]
+            if not isinstance(labels, list):
+                labels = [labels]
+            labels_key = ":".join(labels)
+            node_properties[labels_key] = {prop["propertyKey"]: determine_type(prop["propertyValue"]) for prop in node["properties"]}
 
         logger.info(f"Fetched schema properties for nodes: {node_properties}")
         return node_properties
@@ -84,7 +88,10 @@ def fetch_nodes_from_neo4j(driver, node_properties):
         nodes_list = []
         for record in result:
             node = record["n"]
-            labels_key = ":".join(node.labels)
+            labels = node.labels
+            if not isinstance(labels, list):
+                labels = [labels]
+            labels_key = ":".join(labels)
             node_props_schema = node_properties.get(labels_key, {})
 
             node_properties_types = {
@@ -94,7 +101,7 @@ def fetch_nodes_from_neo4j(driver, node_properties):
 
             nodes_list.append(Node(
                 id=node.id,
-                labels=node.labels,
+                labels=labels,
                 properties=node_properties_types
             ))
         logger.info(f"Fetched nodes: {nodes_list}")
