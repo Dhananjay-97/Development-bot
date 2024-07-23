@@ -2,7 +2,7 @@ import logging
 from fastapi import FastAPI, APIRouter, HTTPException
 from neo4j import GraphDatabase, basic_auth
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 # Set up logging
@@ -21,10 +21,18 @@ app = FastAPI()
 router = APIRouter()
 
 # Pydantic models
+class Relationship(BaseModel):
+    id: int
+    type: str
+    start_node_id: int
+    end_node_id: int
+    properties: Dict[str, Any]
+
 class Node(BaseModel):
     id: int
     labels: List[str]
     properties: Dict[str, str]  # Dictionary of property names to their types
+    relationships: List[Relationship] = []  # List of relationships
 
 class DbCredentials(BaseModel):
     uri: Optional[str] = DEFAULT_NEO4J_URI
@@ -77,10 +85,15 @@ def fetch_schema(driver):
         logger.info(f"Fetched schema properties for nodes: {node_properties}")
         return node_properties
 
-# Fetch nodes from Neo4j
-def fetch_nodes_from_neo4j(driver, node_properties):
-    query = "MATCH (n) RETURN n, keys(n) AS prop_keys, [key in keys(n) | n[key]] AS prop_values LIMIT 10"
-    logger.info("Fetching nodes from Neo4j")
+# Fetch nodes and relationships from Neo4j
+def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
+    query = """
+    MATCH (n)
+    OPTIONAL MATCH (n)-[r]->(m)
+    RETURN n, keys(n) AS prop_keys, [key in keys(n) | n[key]] AS prop_values, collect(r) AS relationships, collect(m) AS related_nodes
+    LIMIT 10
+    """
+    logger.info("Fetching nodes and relationships from Neo4j")
     with driver.session() as session:
         result = session.run(query)
         nodes_list = []
@@ -88,6 +101,9 @@ def fetch_nodes_from_neo4j(driver, node_properties):
             node = record["n"]
             prop_keys = record["prop_keys"]
             prop_values = record["prop_values"]
+            relationships = record["relationships"]
+            related_nodes = record["related_nodes"]
+
             labels = list(node.labels) if node.labels is not None else []
             labels_key = ":".join([label for label in labels if label is not None])
             node_props_schema = node_properties.get(labels_key, {})
@@ -97,22 +113,36 @@ def fetch_nodes_from_neo4j(driver, node_properties):
                 for prop_key, prop_value in zip(prop_keys, prop_values)
             }
 
+            relationships_list = []
+            for rel, rel_node in zip(relationships, related_nodes):
+                if rel:
+                    rel_properties = {key: rel[key] for key in rel.keys()}
+                    relationship = Relationship(
+                        id=rel.id,
+                        type=rel.type,
+                        start_node_id=rel.start_node_id,
+                        end_node_id=rel.end_node_id,
+                        properties=rel_properties
+                    )
+                    relationships_list.append(relationship)
+
             nodes_list.append(Node(
                 id=node.id,
                 labels=labels,
-                properties=node_properties_dict
+                properties=node_properties_dict,
+                relationships=relationships_list
             ))
         logger.info(f"Fetched nodes: {nodes_list}")
         return nodes_list
 
-# Define the endpoint to fetch nodes
+# Define the endpoint to fetch nodes and relationships
 @router.post("/nodes", response_model=List[Node])
 async def get_nodes(credentials: DbCredentials = DbCredentials()):
     try:
-        logger.info("Received request to fetch nodes")
+        logger.info("Received request to fetch nodes and relationships")
         driver = get_neo4j_driver(credentials)
         node_properties = fetch_schema(driver)
-        nodes = fetch_nodes_from_neo4j(driver, node_properties)
+        nodes = fetch_nodes_and_relationships_from_neo4j(driver, node_properties)
         return nodes
     except Exception as e:
         logger.error(f"Error fetching nodes: {e}")
