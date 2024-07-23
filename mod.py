@@ -1,8 +1,13 @@
+import logging
 from fastapi import FastAPI, APIRouter, HTTPException
 from neo4j import GraphDatabase, basic_auth
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any
 from datetime import datetime
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Default Neo4j database configuration
 DEFAULT_NEO4J_URI = "bolt://localhost:7687"
@@ -16,9 +21,6 @@ app = FastAPI()
 router = APIRouter()
 
 # Pydantic models
-class NodeProperty(BaseModel):
-    type: str
-
 class Node(BaseModel):
     id: int
     labels: List[str]
@@ -31,6 +33,7 @@ class DbCredentials(BaseModel):
 
 # Create Neo4j driver
 def get_neo4j_driver(credentials: DbCredentials):
+    logger.info(f"Initializing Neo4j driver with URI: {credentials.uri}")
     driver = GraphDatabase.driver(credentials.uri, auth=basic_auth(credentials.user, credentials.password))
     return driver
 
@@ -50,13 +53,16 @@ def determine_type(value):
 # Fetch schema information
 def fetch_schema(driver):
     query = "CALL db.schema.visualization()"
+    logger.info("Fetching schema information")
     with driver.session() as session:
         result = session.run(query)
         if not result:
+            logger.warning("No schema information returned")
             return {}
 
         record = result.single()
         if not record:
+            logger.warning("Schema visualization query returned no records")
             return {}
 
         nodes = record.get("nodes", [])
@@ -67,18 +73,13 @@ def fetch_schema(driver):
             labels = ":".join(node["labels"])
             node_properties[labels] = {prop["propertyKey"]: determine_type(prop["propertyValue"]) for prop in node["properties"]}
 
+        logger.info(f"Fetched schema properties for nodes: {node_properties}")
         return node_properties
 
 # Fetch nodes from Neo4j
-def fetch_nodes_from_neo4j(driver):
-    node_properties = fetch_schema(driver)
-
-    query = """
-    MATCH (n)
-    RETURN n
-    LIMIT 10
-    """
-
+def fetch_nodes_from_neo4j(driver, node_properties):
+    query = "MATCH (n) RETURN n LIMIT 10"
+    logger.info("Fetching nodes from Neo4j")
     with driver.session() as session:
         result = session.run(query)
         nodes_list = []
@@ -97,20 +98,24 @@ def fetch_nodes_from_neo4j(driver):
                 labels=node.labels,
                 properties=node_properties_types
             ))
-
+        logger.info(f"Fetched nodes: {nodes_list}")
         return nodes_list
 
 # Define the endpoint to fetch nodes
 @router.post("/nodes", response_model=List[Node])
 async def get_nodes(credentials: DbCredentials = DbCredentials()):
     try:
+        logger.info("Received request to fetch nodes")
         driver = get_neo4j_driver(credentials)
-        nodes = fetch_nodes_from_neo4j(driver)
+        node_properties = fetch_schema(driver)
+        nodes = fetch_nodes_from_neo4j(driver, node_properties)
         return nodes
     except Exception as e:
+        logger.error(f"Error fetching nodes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         driver.close()
+        logger.info("Closed Neo4j driver")
 
 # Include the router in the FastAPI app
 app.include_router(router, prefix="/api")
