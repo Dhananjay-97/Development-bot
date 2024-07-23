@@ -2,8 +2,8 @@ import logging
 from fastapi import FastAPI, APIRouter, HTTPException
 from neo4j import GraphDatabase, basic_auth
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-from datetime import datetime, date
+from typing import List, Optional, Dict
+from datetime import datetime
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -22,16 +22,14 @@ router = APIRouter()
 
 # Pydantic models
 class Relationship(BaseModel):
-    id: int
     type: str
     start_node_id: int
     end_node_id: int
-    properties: Dict[str, Any]
 
 class Node(BaseModel):
     id: int
     labels: List[str]
-    properties: Dict[str, Any]  # Dictionary of property names to their values
+    properties: Dict[str, str]  # Dictionary of property names to their data types
     relationships: List[Relationship] = []  # List of relationships
 
 class DbCredentials(BaseModel):
@@ -45,18 +43,18 @@ def get_neo4j_driver(credentials: DbCredentials):
     driver = GraphDatabase.driver(credentials.uri, auth=basic_auth(credentials.user, credentials.password))
     return driver
 
-# Convert Neo4j-specific types to standard Python types
-def convert_neo4j_value(value):
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    elif isinstance(value, (int, float, bool)):
-        return value
-    elif isinstance(value, (list, set, tuple)):
-        return [convert_neo4j_value(v) for v in value]
-    elif value is None:
-        return value
+# Determine the property type
+def determine_type(value):
+    if isinstance(value, datetime):
+        return "datetime"
+    elif isinstance(value, int):
+        return "int"
+    elif isinstance(value, float):
+        return "float"
+    elif isinstance(value, bool):
+        return "boolean"
     else:
-        return str(value)
+        return "string"
 
 # Fetch schema information
 def fetch_schema(driver):
@@ -79,7 +77,7 @@ def fetch_schema(driver):
         for node in nodes:
             labels = list(node.get("labels", []))
             labels_key = ":".join([label for label in labels if label is not None])
-            node_properties[labels_key] = {prop["propertyKey"]: type(prop["propertyValue"]).__name__ for prop in node.get("properties", [])}
+            node_properties[labels_key] = {prop["propertyKey"]: determine_type(prop["propertyValue"]) for prop in node.get("properties", [])}
 
         logger.info(f"Fetched schema properties for nodes: {node_properties}")
         return node_properties
@@ -89,7 +87,7 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
     query = """
     MATCH (n)
     OPTIONAL MATCH (n)-[r]->(m)
-    RETURN n, keys(n) AS prop_keys, [key in keys(n) | n[key]] AS prop_values, collect(r) AS relationships, collect(m) AS related_nodes
+    RETURN n, keys(n) AS prop_keys, collect(r) AS relationships, collect(m) AS related_nodes
     LIMIT 10
     """
     logger.info("Fetching nodes and relationships from Neo4j")
@@ -99,7 +97,6 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
         for record in result:
             node = record["n"]
             prop_keys = record["prop_keys"]
-            prop_values = record["prop_values"]
             relationships = record["relationships"]
             related_nodes = record["related_nodes"]
 
@@ -107,18 +104,15 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
             labels_key = ":".join([label for label in labels if label is not None])
             node_props_schema = node_properties.get(labels_key, {})
 
-            node_properties_dict = {prop_key: convert_neo4j_value(prop_value) for prop_key, prop_value in zip(prop_keys, prop_values)}
+            node_properties_dict = {prop_key: node_props_schema.get(prop_key, "unknown") for prop_key in prop_keys}
 
             relationships_list = []
             for rel in relationships:
                 if rel:
-                    rel_properties = {key: convert_neo4j_value(rel[key]) for key in rel.keys() if key not in {"id", "type", "start_node_id", "end_node_id"}}
                     relationship = Relationship(
-                        id=rel.id,
                         type=rel.type,
                         start_node_id=rel.start_node_id,
-                        end_node_id=rel.end_node_id,
-                        properties=rel_properties
+                        end_node_id=rel.end_node_id
                     )
                     relationships_list.append(relationship)
 
