@@ -2,7 +2,7 @@ import logging
 from fastapi import FastAPI, APIRouter, HTTPException
 from neo4j import GraphDatabase, basic_auth
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 # Set up logging
@@ -98,7 +98,6 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
             node = record["n"]
             prop_keys = record["prop_keys"]
             relationships = record["relationships"]
-            related_nodes = record["related_nodes"]
 
             labels = list(node.labels) if node.labels is not None else []
             labels_key = ":".join([label for label in labels if label is not None])
