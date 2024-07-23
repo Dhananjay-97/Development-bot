@@ -2,7 +2,7 @@ import logging
 from fastapi import FastAPI, APIRouter, HTTPException
 from neo4j import GraphDatabase, basic_auth
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 # Set up logging
@@ -87,7 +87,7 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
     query = """
     MATCH (n)
     OPTIONAL MATCH (n)-[r]->(m)
-    RETURN n, keys(n) AS prop_keys, collect(r) AS relationships
+    RETURN n, keys(n) AS prop_keys, collect(r) AS relationships, collect(m) AS related_nodes
     LIMIT 10
     """
     logger.info("Fetching nodes and relationships from Neo4j")
@@ -110,8 +110,8 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
                 if rel:
                     relationship = Relationship(
                         type=rel.type,
-                        start_node_id=rel.start_node_id,
-                        end_node_id=rel.end_node_id
+                        start_node_id=rel.start_node.id,
+                        end_node_id=rel.end_node.id
                     )
                     relationships_list.append(relationship)
 
