@@ -2,7 +2,7 @@ import logging
 from fastapi import FastAPI, APIRouter, HTTPException
 from neo4j import GraphDatabase, basic_auth
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 from datetime import datetime
 
 # Set up logging
@@ -70,11 +70,11 @@ def fetch_schema(driver):
         node_properties = {}
 
         for node in nodes:
-            labels = node["labels"]
+            labels = node.get("labels", [])
             if not isinstance(labels, list):
                 labels = [labels]
             labels_key = ":".join([label for label in labels if label is not None])
-            node_properties[labels_key] = {prop["propertyKey"]: determine_type(prop["propertyValue"]) for prop in node["properties"]}
+            node_properties[labels_key] = {prop["propertyKey"]: determine_type(prop["propertyValue"]) for prop in node.get("properties", [])}
 
         logger.info(f"Fetched schema properties for nodes: {node_properties}")
         return node_properties
@@ -88,7 +88,7 @@ def fetch_nodes_from_neo4j(driver, node_properties):
         nodes_list = []
         for record in result:
             node = record["n"]
-            labels = node.labels
+            labels = node.labels if node.labels is not None else []
             if not isinstance(labels, list):
                 labels = [labels]
             labels_key = ":".join([label for label in labels if label is not None])
