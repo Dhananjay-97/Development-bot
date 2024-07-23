@@ -87,7 +87,8 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
     query = """
     MATCH (n)
     OPTIONAL MATCH (n)-[r]->(m)
-    RETURN n, keys(n) AS prop_keys, collect(r) AS relationships
+    RETURN n, keys(n) AS prop_keys, [key IN keys(n) | n[key]] AS prop_values, 
+           collect({type: type(r), start_node_id: id(startNode(r)), end_node_id: id(endNode(r))}) AS relationships
     LIMIT 10
     """
     logger.info("Fetching nodes and relationships from Neo4j")
@@ -97,6 +98,7 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
         for record in result:
             node = record["n"]
             prop_keys = record["prop_keys"]
+            prop_values = record["prop_values"]
             relationships = record["relationships"]
 
             labels = list(node.labels) if node.labels is not None else []
@@ -107,13 +109,12 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
 
             relationships_list = []
             for rel in relationships:
-                if rel:
-                    relationship = Relationship(
-                        type=rel.type,
-                        start_node_id=rel.start_node.id,
-                        end_node_id=rel.end_node.id
-                    )
-                    relationships_list.append(relationship)
+                relationship = Relationship(
+                    type=rel['type'],
+                    start_node_id=rel['start_node_id'],
+                    end_node_id=rel['end_node_id']
+                )
+                relationships_list.append(relationship)
 
             nodes_list.append(Node(
                 id=node.id,
