@@ -31,7 +31,7 @@ class Relationship(BaseModel):
 class Node(BaseModel):
     id: int
     labels: List[str]
-    properties: Dict[str, str]  # Dictionary of property names to their types
+    properties: Dict[str, Any]  # Dictionary of property names to their values
     relationships: List[Relationship] = []  # List of relationships
 
 class DbCredentials(BaseModel):
@@ -44,19 +44,6 @@ def get_neo4j_driver(credentials: DbCredentials):
     logger.info(f"Initializing Neo4j driver with URI: {credentials.uri}")
     driver = GraphDatabase.driver(credentials.uri, auth=basic_auth(credentials.user, credentials.password))
     return driver
-
-# Determine the property type
-def determine_type(value):
-    if isinstance(value, datetime):
-        return "datetime"
-    elif isinstance(value, int):
-        return "int"
-    elif isinstance(value, float):
-        return "float"
-    elif isinstance(value, bool):
-        return "boolean"
-    else:
-        return "string"
 
 # Fetch schema information
 def fetch_schema(driver):
@@ -74,7 +61,6 @@ def fetch_schema(driver):
             return {}
 
         nodes = record.get("nodes", [])
-
         node_properties = {}
 
         for node in nodes:
@@ -84,6 +70,19 @@ def fetch_schema(driver):
 
         logger.info(f"Fetched schema properties for nodes: {node_properties}")
         return node_properties
+
+# Determine the property type
+def determine_type(value):
+    if isinstance(value, datetime):
+        return "datetime"
+    elif isinstance(value, int):
+        return "int"
+    elif isinstance(value, float):
+        return "float"
+    elif isinstance(value, bool):
+        return "boolean"
+    else:
+        return "string"
 
 # Fetch nodes and relationships from Neo4j
 def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
@@ -108,15 +107,12 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
             labels_key = ":".join([label for label in labels if label is not None])
             node_props_schema = node_properties.get(labels_key, {})
 
-            node_properties_dict = {
-                prop_key: determine_type(prop_value)
-                for prop_key, prop_value in zip(prop_keys, prop_values)
-            }
+            node_properties_dict = {prop_key: prop_value for prop_key, prop_value in zip(prop_keys, prop_values)}
 
             relationships_list = []
             for rel, rel_node in zip(relationships, related_nodes):
                 if rel:
-                    rel_properties = {key: rel[key] for key in rel.keys()}
+                    rel_properties = {key: rel[key] for key in rel.keys() if key not in {"id", "type", "start_node_id", "end_node_id"}}
                     relationship = Relationship(
                         id=rel.id,
                         type=rel.type,
