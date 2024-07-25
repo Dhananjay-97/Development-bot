@@ -25,14 +25,13 @@ class Relationship(BaseModel):
     start_node_labels: Optional[List[str]]
     end_node_labels: Optional[List[str]]
 
-class Node(BaseModel):
-    labels: List[str]
+class NodeProperties(BaseModel):
     properties: Dict[str, Any]
     relationships: List[Relationship]
 
 class NodeResponse(BaseModel):
     node_labels: List[str]
-    labels: Dict[str, Node]
+    labels: Dict[str, NodeProperties]
 
 class DbCredentials(BaseModel):
     uri: Optional[str] = DEFAULT_NEO4J_URI
@@ -68,16 +67,18 @@ def fetch_schema(driver):
             return {}
 
         nodes = record.get("nodes", [])
+        node_labels = set()
         node_properties = {}
 
         for node in nodes:
             labels = list(node.get("labels", []))
+            node_labels.update(labels)
             labels_key = ":".join([label for label in labels if label is not None])
             node_properties[labels_key] = {prop["propertyKey"]: determine_type(prop["propertyValue"]) for prop in node.get("properties", [])}
 
         logger.info(f"Fetched schema properties for nodes: {node_properties}")
-        return node_properties
-def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
+        return list(node_labels), node_properties
+def fetch_nodes_and_relationships_from_neo4j(driver, node_labels, node_properties):
     query = """
     MATCH (n)
     OPTIONAL MATCH (n)-[r]->(m)
@@ -92,7 +93,7 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
     logger.info("Fetching nodes and relationships from Neo4j")
     with driver.session() as session:
         result = session.run(query)
-        nodes_list = []
+        labels_dict = {label: {"properties": {}, "relationships": []} for label in node_labels}
         for record in result:
             node = record["n"]
             labels = record["labels"]
@@ -100,10 +101,7 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
             prop_values = record["prop_values"]
             relationships = record["relationships"]
 
-            node_properties_dict = {
-                prop_key: node.get(prop_key, "unknown")
-                for prop_key in prop_keys
-            }
+            node_properties_dict = {prop_key: prop_value for prop_key, prop_value in zip(prop_keys, prop_values)}
 
             relationships_list = []
             for rel in relationships:
@@ -114,16 +112,20 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
                 )
                 relationships_list.append(relationship)
 
-            nodes_list.append([labels, {"labels": {"properties": node_properties_dict, "relationships": relationships_list}}])
+            for label in labels:
+                labels_dict[label]["properties"] = node_properties_dict
+                labels_dict[label]["relationships"] = relationships_list
+
+        nodes_list = [node_labels, labels_dict]
         logger.info(f"Fetched nodes: {nodes_list}")
         return nodes_list
-@router.post("/nodes", response_model=List[NodeResponse])
+@router.post("/nodes", response_model=NodeResponse)
 async def get_nodes(credentials: DbCredentials = DbCredentials()):
     try:
         logger.info("Received request to fetch nodes and relationships")
         driver = get_neo4j_driver(credentials)
-        node_properties = fetch_schema(driver)
-        nodes = fetch_nodes_and_relationships_from_neo4j(driver, node_properties)
+        node_labels, node_properties = fetch_schema(driver)
+        nodes = fetch_nodes_and_relationships_from_neo4j(driver, node_labels, node_properties)
         return nodes
     except Exception as e:
         logger.error(f"Error fetching nodes: {e}")
