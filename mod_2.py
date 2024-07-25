@@ -26,17 +26,19 @@ class Relationship(BaseModel):
     end_node_labels: Optional[List[str]]
 
 class LabelDetails(BaseModel):
-    properties: Dict[str, Any]
+    properties: Dict[str, str]
     relationships: List[Relationship]
 
 class NodeResponse(BaseModel):
     node_labels: List[str]
-    labels: Dict[str, LabelDetails]
+    label_info: Dict[str, LabelDetails]
 
 class DbCredentials(BaseModel):
     uri: Optional[str] = DEFAULT_NEO4J_URI
     user: Optional[str] = DEFAULT_NEO4J_USER
     password: Optional[str] = DEFAULT_NEO4J_PASSWORD
+
+
 def get_neo4j_driver(credentials: DbCredentials):
     logger.info(f"Initializing Neo4j driver with URI: {credentials.uri}")
     driver = GraphDatabase.driver(credentials.uri, auth=basic_auth(credentials.user, credentials.password))
@@ -61,12 +63,12 @@ def fetch_schema(driver):
         result = session.run(query)
         if not result:
             logger.warning("No schema information returned")
-            return {}
+            return [], {}
 
         record = result.single()
         if not record:
             logger.warning("Schema visualization query returned no records")
-            return {}
+            return [], {}
 
         nodes = record.get("nodes", [])
         node_labels = set()
@@ -81,16 +83,13 @@ def fetch_schema(driver):
 
         logger.info(f"Fetched schema properties for nodes: {node_properties}")
         return list(node_labels), node_properties
+
 def fetch_nodes_and_relationships_from_neo4j(driver, node_labels, node_properties):
     query = """
     MATCH (n)
     OPTIONAL MATCH (n)-[r]->(m)
-    WITH n, labels(n) AS labels, keys(n) AS prop_keys, [key IN keys(n) | n[key]] AS prop_values, collect(r) AS relationships_data
-    RETURN n, 
-           labels, 
-           prop_keys, 
-           prop_values, 
-           [rel IN relationships_data | {type: type(rel), start_node_labels: labels(startNode(rel)), end_node_labels: labels(endNode(rel))}] AS relationships
+    RETURN n, labels(n) AS labels, keys(n) AS prop_keys, [key IN keys(n) | n[key]] AS prop_values, 
+           collect({type: type(r), start_node_labels: labels(startNode(r)), end_node_labels: labels(endNode(r))}) AS relationships
     LIMIT 10
     """
     logger.info("Fetching nodes and relationships from Neo4j")
@@ -103,24 +102,25 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_labels, node_propertie
             prop_values = record["prop_values"]
             relationships = record["relationships"]
 
-            node_properties_dict = {prop_key: prop_value for prop_key, prop_value in zip(prop_keys, prop_values)}
-
-            relationships_list = []
-            for rel in relationships:
-                relationship = Relationship(
-                    type=rel.get('type'),
-                    start_node_labels=rel.get('start_node_labels'),
-                    end_node_labels=rel.get('end_node_labels')
-                )
-                relationships_list.append(relationship)
+            node_properties_dict = {prop_key: determine_type(prop_value) for prop_key, prop_value in zip(prop_keys, prop_values)}
 
             for label in labels:
-                labels_dict[label]["properties"] = node_properties_dict
-                labels_dict[label]["relationships"] = relationships_list
+                if label in labels_dict:
+                    # Merge properties
+                    labels_dict[label]["properties"].update(node_properties_dict)
+                    # Add relationships
+                    for rel in relationships:
+                        relationship = Relationship(
+                            type=rel.get('type'),
+                            start_node_labels=rel.get('start_node_labels'),
+                            end_node_labels=rel.get('end_node_labels')
+                        )
+                        labels_dict[label]["relationships"].append(relationship)
 
-        nodes_list = [node_labels, labels_dict]
+        nodes_list = {"node_labels": node_labels, "label_info": labels_dict}
         logger.info(f"Fetched nodes: {nodes_list}")
         return nodes_list
+
 
 @router.post("/nodes", response_model=NodeResponse)
 async def get_nodes(credentials: DbCredentials = DbCredentials()):
@@ -129,13 +129,14 @@ async def get_nodes(credentials: DbCredentials = DbCredentials()):
         driver = get_neo4j_driver(credentials)
         node_labels, node_properties = fetch_schema(driver)
         nodes = fetch_nodes_and_relationships_from_neo4j(driver, node_labels, node_properties)
-        return {"node_labels": nodes[0], "labels": nodes[1]}
+        return nodes
     except Exception as e:
         logger.error(f"Error fetching nodes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         driver.close()
         logger.info("Closed Neo4j driver")
+
 
 app.include_router(router, prefix="/api")
 
