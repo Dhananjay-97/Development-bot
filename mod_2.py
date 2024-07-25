@@ -38,7 +38,6 @@ class DbCredentials(BaseModel):
     user: Optional[str] = DEFAULT_NEO4J_USER
     password: Optional[str] = DEFAULT_NEO4J_PASSWORD
 
-
 def get_neo4j_driver(credentials: DbCredentials):
     logger.info(f"Initializing Neo4j driver with URI: {credentials.uri}")
     driver = GraphDatabase.driver(credentials.uri, auth=basic_auth(credentials.user, credentials.password))
@@ -102,12 +101,16 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_labels, node_propertie
             prop_values = record["prop_values"]
             relationships = record["relationships"]
 
+            logger.info(f"Processing record with labels: {labels}")
+
             node_properties_dict = {prop_key: determine_type(prop_value) for prop_key, prop_value in zip(prop_keys, prop_values)}
 
             for label in labels:
                 if label in labels_dict:
+                    logger.info(f"Adding properties to label {label}")
                     # Merge properties
-                    labels_dict[label]["properties"].update(node_properties_dict)
+                    for key, value in zip(prop_keys, prop_values):
+                        labels_dict[label]["properties"][key] = determine_type(value)
                     # Add relationships
                     for rel in relationships:
                         relationship = Relationship(
@@ -121,14 +124,16 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_labels, node_propertie
         logger.info(f"Fetched nodes: {nodes_list}")
         return nodes_list
 
-
 @router.post("/nodes", response_model=NodeResponse)
 async def get_nodes(credentials: DbCredentials = DbCredentials()):
     try:
         logger.info("Received request to fetch nodes and relationships")
         driver = get_neo4j_driver(credentials)
         node_labels, node_properties = fetch_schema(driver)
+        logger.info(f"Node labels: {node_labels}")
+        logger.info(f"Node properties: {node_properties}")
         nodes = fetch_nodes_and_relationships_from_neo4j(driver, node_labels, node_properties)
+        logger.info(f"Final nodes response: {nodes}")
         return nodes
     except Exception as e:
         logger.error(f"Error fetching nodes: {e}")
@@ -136,7 +141,6 @@ async def get_nodes(credentials: DbCredentials = DbCredentials()):
     finally:
         driver.close()
         logger.info("Closed Neo4j driver")
-
 
 app.include_router(router, prefix="/api")
 
