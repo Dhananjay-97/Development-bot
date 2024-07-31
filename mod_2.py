@@ -64,7 +64,9 @@ def determine_type(value):
         return "string"
 
 def fetch_schema(driver):
-    query = "CALL db.schema.visualization()"
+    query = """
+    CALL db.schema.visualization()
+    """
     logger.info("Fetching schema information")
     with driver.session() as session:
         result = session.run(query)
@@ -78,7 +80,9 @@ def fetch_schema(driver):
             return {}
 
         nodes = record.get("nodes", [])
+        relationships = record.get("relationships", [])
         node_properties = {}
+        schema_relationships = []
 
         for node in nodes:
             labels = list(node.get("labels", []))
@@ -86,15 +90,23 @@ def fetch_schema(driver):
                 if label not in node_properties:
                     node_properties[label] = {prop["propertyKey"]: determine_type(prop["propertyValue"]) for prop in node.get("properties", [])}
 
+        for rel in relationships:
+            schema_relationships.append({
+                "type": rel.get("type"),
+                "start_node_labels": list(rel.get("startNode", {}).get("labels", [])),
+                "end_node_labels": list(rel.get("endNode", {}).get("labels", []))
+            })
+
         logger.info(f"Fetched schema properties for nodes: {node_properties}")
-        return node_properties
+        logger.info(f"Fetched schema relationships: {schema_relationships}")
+        return node_properties, schema_relationships
 
 def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
     query = """
     MATCH (n)
     OPTIONAL MATCH (n)-[r]->(m)
     RETURN n, labels(n) AS labels, keys(n) AS prop_keys, [key IN keys(n) | n[key]] AS prop_values, 
-           collect({type: type(r), start_node_labels: labels(startNode(r)), end_node_labels: labels(endNode(r))}) AS relationships
+           collect(DISTINCT {type: type(r), start_node_labels: labels(startNode(r)), end_node_labels: labels(endNode(r))}) AS relationships
     LIMIT 10
     """
     logger.info("Fetching nodes and relationships from Neo4j")
@@ -147,7 +159,7 @@ async def get_nodes(credentials: DbCredentials = Depends()):
     try:
         logger.info("Received request to fetch nodes and relationships")
         driver = get_neo4j_driver(credentials)
-        node_properties = fetch_schema(driver)
+        node_properties, _ = fetch_schema(driver)
         logger.info(f"Node properties: {node_properties}")
         nodes = fetch_nodes_and_relationships_from_neo4j(driver, node_properties)
         logger.info(f"Final nodes response: {nodes}")
