@@ -121,8 +121,6 @@ def fetch_nodes_and_relationships_from_neo4j(driver, node_properties):
 
             logger.info(f"Processing record with labels: {labels}")
 
-            node_properties_dict = {prop_key: determine_type(prop_value) for prop_key, prop_value in zip(prop_keys, prop_values)}
-
             for label in labels:
                 if label in labels_dict:
                     logger.info(f"Adding properties to label {label}")
